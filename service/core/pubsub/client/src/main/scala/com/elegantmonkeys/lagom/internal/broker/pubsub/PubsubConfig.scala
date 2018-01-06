@@ -25,13 +25,27 @@ object PubsubConfig {
 
 }
 
-sealed trait ProducerConfig {
+sealed trait ClientConfig {
   def minBackoff: FiniteDuration
 
   def maxBackoff: FiniteDuration
 
   def randomBackoffFactor: Double
+}
 
+object ClientConfig {
+
+  private[pubsub] class ClientConfigImpl(conf: Config) extends ClientConfig {
+    override val minBackoff: FiniteDuration =
+      conf.getDuration("failure-exponential-backoff.min", TimeUnit.MILLISECONDS).millis
+    override val maxBackoff: FiniteDuration =
+      conf.getDuration("failure-exponential-backoff.max", TimeUnit.MILLISECONDS).millis
+    override val randomBackoffFactor: Double = conf.getDouble("failure-exponential-backoff.random-factor")
+  }
+
+}
+
+sealed trait ProducerConfig extends ClientConfig {
   def role: Option[String]
 }
 
@@ -39,25 +53,17 @@ object ProducerConfig {
   def apply(conf: Config): ProducerConfig =
     new ProducerConfigImpl(conf.getConfig("lagom.broker.pubsub.client.producer"))
 
-  private class ProducerConfigImpl(conf: Config) extends ProducerConfig {
+  private class ProducerConfigImpl(conf: Config) extends ClientConfig.ClientConfigImpl(conf) with ProducerConfig {
 
     override val role: Option[String] = conf.getString("role") match {
       case "" => None
       case other => Some(other)
     }
-
-    override val minBackoff: FiniteDuration =
-      conf.getDuration("failure-exponential-backoff.min", TimeUnit.MILLISECONDS).millis
-
-    override val maxBackoff: FiniteDuration =
-      conf.getDuration("failure-exponential-backoff.max", TimeUnit.MILLISECONDS).millis
-
-    override val randomBackoffFactor: Double = conf.getDouble("failure-exponential-backoff.random-factor")
   }
 
 }
 
-sealed trait ConsumerConfig {
+sealed trait ConsumerConfig extends ClientConfig {
   /** The name of the subscription that will be created to pull messages */
   def subscriptionName: String
 
@@ -72,7 +78,7 @@ object ConsumerConfig {
   def apply(conf: Config): ConsumerConfig =
     new ConsumerConfigImpl(conf.getConfig("lagom.broker.pubsub.client.consumer"))
 
-  private final class ConsumerConfigImpl(conf: Config) extends ConsumerConfig {
+  private final class ConsumerConfigImpl(conf: Config) extends ClientConfig.ClientConfigImpl(conf) with ConsumerConfig {
 
     override val subscriptionName: String = conf.getString("subscription-name")
     override val ackDeadline: Int = conf.getInt("ack-deadline")
