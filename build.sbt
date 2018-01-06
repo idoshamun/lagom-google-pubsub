@@ -9,6 +9,8 @@ val lagomApi = "com.lightbend.lagom" %% "lagom-api" % lagomVersion
 val lagomApiJavaDsl = "com.lightbend.lagom" %% "lagom-javadsl-api" % lagomVersion
 val lagomApiScalaDsl = "com.lightbend.lagom" %% "lagom-scaladsl-api" % lagomVersion
 val lagomPersistenceCore = "com.lightbend.lagom" %% "lagom-persistence-core" % lagomVersion
+val lagomJavadslBroker = "com.lightbend.lagom" %% "lagom-javadsl-broker" % lagomVersion
+val lagomJavadslServer = "com.lightbend.lagom" %% "lagom-javadsl-server" % lagomVersion
 val lagomScaladslBroker = "com.lightbend.lagom" %% "lagom-scaladsl-broker" % lagomVersion
 val lagomScaladslServer = "com.lightbend.lagom" %% "lagom-scaladsl-server" % lagomVersion
 val pubsubSdk = "com.google.cloud" % "google-cloud-pubsub" % "0.32.0-beta"
@@ -30,6 +32,24 @@ lazy val `client` = (project in file("service/core/pubsub/client"))
     )
   )
 
+lazy val `client-scaladsl` = (project in file("service/scaladsl/pubsub/client"))
+  .settings(name := "lagom-scaladsl-google-pubsub-client")
+  .settings(
+    libraryDependencies ++= Seq(
+      lagomApiScalaDsl
+    )
+  )
+  .dependsOn(`client`)
+
+lazy val `client-javadsl` = (project in file("service/javadsl/pubsub/client"))
+  .settings(name := "lagom-javadsl-google-pubsub-client")
+  .settings(
+    libraryDependencies ++= Seq(
+      lagomJavadslServer
+    )
+  )
+  .dependsOn(`client`)
+
 lazy val `server` = (project in file("service/core/pubsub/server"))
   .settings(name := "lagom-google-pubsub-broker")
   .settings(
@@ -38,15 +58,6 @@ lazy val `server` = (project in file("service/core/pubsub/server"))
       pubsubSdk,
       lagomApi,
       lagomPersistenceCore
-    )
-  )
-  .dependsOn(`client`)
-
-lazy val `client-scaladsl` = (project in file("service/scaladsl/pubsub/client"))
-  .settings(name := "lagom-scaladsl-google-pubsub-client")
-  .settings(
-    libraryDependencies ++= Seq(
-      lagomApiScalaDsl
     )
   )
   .dependsOn(`client`)
@@ -60,3 +71,13 @@ lazy val `server-scaladsl` = (project in file("service/scaladsl/pubsub/server"))
     )
   )
   .dependsOn(`server`, `client-scaladsl`)
+
+lazy val `server-javadsl` = (project in file("service/javadsl/pubsub/server"))
+  .settings(name := "lagom-javadsl-google-pubsub-broker")
+  .settings(
+    libraryDependencies ++= Seq(
+      lagomJavadslBroker,
+      lagomJavadslServer
+    )
+  )
+  .dependsOn(`server`, `client-javadsl`)
