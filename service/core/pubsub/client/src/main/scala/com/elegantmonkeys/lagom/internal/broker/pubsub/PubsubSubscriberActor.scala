@@ -1,7 +1,6 @@
 package com.elegantmonkeys.lagom.internal.broker.pubsub
 
 import java.io.FileInputStream
-import java.net.URI
 
 import akka.{Done, NotUsed}
 import akka.actor.{Actor, ActorLogging, Props, Status}
@@ -47,6 +46,7 @@ private[lagom] class PubsubSubscriberActor[Message](pubsubConfig: PubsubConfig,
   private def creatingSubscription(topic: TopicName, subscription: SubscriptionName,
                                    credentials: CredentialsProvider): Receive = {
     case SubscriptionCreated =>
+      log.debug("Subscription [{}] created", subscription.getSubscription)
       run(subscription, credentials)
   }
 
@@ -80,7 +80,8 @@ private[lagom] class PubsubSubscriberActor[Message](pubsubConfig: PubsubConfig,
 
 object PubsubSubscriberActor {
   def createSubscription(consumerConfig: ConsumerConfig, topic: TopicName,
-                         subscription: SubscriptionName, credentials: CredentialsProvider): Future[Unit] = Future {
+                         subscription: SubscriptionName, credentials: CredentialsProvider)
+                        (implicit ec: ExecutionContext): Future[Unit] = Future {
     val settings: SubscriptionAdminSettings = SubscriptionAdminSettings
       .newBuilder()
       .setCredentialsProvider(credentials)
