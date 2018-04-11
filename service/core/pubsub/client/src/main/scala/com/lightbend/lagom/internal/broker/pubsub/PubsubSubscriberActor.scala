@@ -10,9 +10,10 @@ import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import Protocol._
 import PubsubSubscriberActor._
 import com.google.api.gax.core.{CredentialsProvider, FixedCredentialsProvider}
+import com.google.api.gax.rpc.AlreadyExistsException
 import com.google.auth.oauth2.ServiceAccountCredentials
 import com.google.cloud.pubsub.v1.{SubscriptionAdminClient, SubscriptionAdminSettings}
-import com.google.pubsub.v1.{PubsubMessage, PushConfig, SubscriptionName, TopicName}
+import com.google.pubsub.v1._
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
@@ -29,8 +30,9 @@ private[lagom] class PubsubSubscriberActor[Message](pubsubConfig: PubsubConfig,
   private var shutdown: Option[KillSwitch] = None
 
   override def preStart(): Unit = {
-    val topic: TopicName = TopicName.of(pubsubConfig.projectId, topicId)
-    val subscription: SubscriptionName = SubscriptionName.of(pubsubConfig.projectId, consumerConfig.subscriptionName)
+    val topic: ProjectTopicName = ProjectTopicName.of(pubsubConfig.projectId, topicId)
+    val subscription: ProjectSubscriptionName =
+      ProjectSubscriptionName.of(pubsubConfig.projectId, consumerConfig.subscriptionName)
     val credentials: CredentialsProvider =
       FixedCredentialsProvider.create(
         ServiceAccountCredentials.fromStream(new FileInputStream(pubsubConfig.serviceAccountPath)))
@@ -43,14 +45,14 @@ private[lagom] class PubsubSubscriberActor[Message](pubsubConfig: PubsubConfig,
 
   override def receive: Receive = PartialFunction.empty
 
-  private def creatingSubscription(topic: TopicName, subscription: SubscriptionName,
+  private def creatingSubscription(topic: ProjectTopicName, subscription: ProjectSubscriptionName,
                                    credentials: CredentialsProvider): Receive = {
     case SubscriptionCreated =>
       log.debug("Subscription [{}] created", subscription.getSubscription)
       run(subscription, credentials)
   }
 
-  private def run(subscription: SubscriptionName, credentials: CredentialsProvider): Unit = {
+  private def run(subscription: ProjectSubscriptionName, credentials: CredentialsProvider): Unit = {
     val source: Source[PubsubMessage, NotUsed] = Source.fromGraph(new PubsubSource(subscription, credentials))
 
     val (killSwitch, stream) =
@@ -79,8 +81,8 @@ private[lagom] class PubsubSubscriberActor[Message](pubsubConfig: PubsubConfig,
 }
 
 object PubsubSubscriberActor {
-  def createSubscription(consumerConfig: ConsumerConfig, topic: TopicName,
-                         subscription: SubscriptionName, credentials: CredentialsProvider)
+  def createSubscription(consumerConfig: ConsumerConfig, topic: ProjectTopicName,
+                         subscription: ProjectSubscriptionName, credentials: CredentialsProvider)
                         (implicit ec: ExecutionContext): Future[Unit] = Future {
     val settings: SubscriptionAdminSettings = SubscriptionAdminSettings
       .newBuilder()
@@ -88,7 +90,12 @@ object PubsubSubscriberActor {
       .build()
 
     val client: SubscriptionAdminClient = SubscriptionAdminClient.create(settings)
-    client.createSubscription(subscription, topic, PushConfig.getDefaultInstance, consumerConfig.ackDeadline)
+
+    try {
+      client.createSubscription(subscription, topic, PushConfig.getDefaultInstance, consumerConfig.ackDeadline)
+    } catch {
+      case _: AlreadyExistsException =>
+    }
   }
 
   def props[Message](pubsubConfig: PubsubConfig, consumerConfig: ConsumerConfig, topicId: String,

@@ -18,6 +18,6 @@ private[lagom] class ScaladslPubsubTopic[Message](pubsubConfig: PubsubConfig,
                                                   ec: ExecutionContext) extends Topic[Message] {
   override def topicId: TopicId = topicCall.topicId
 
-  override def subscribe: Subscriber[Message] = new ScaladslPubsubSubscriber(pubsubConfig, topicCall,
-    ScaladslPubsubSubscriber.GroupId.default(info), info, system)
+  override def subscribe: Subscriber[Message] = new ScaladslPubsubSubscriber[Message, Message](pubsubConfig, topicCall,
+    ScaladslPubsubSubscriber.GroupId.default(info), info, system, (_, payload) => payload)
 }

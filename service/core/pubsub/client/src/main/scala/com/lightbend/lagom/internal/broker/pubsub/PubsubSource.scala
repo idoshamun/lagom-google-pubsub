@@ -7,9 +7,9 @@ import com.google.api.core.ApiService.Listener
 import com.google.api.gax.core.CredentialsProvider
 import com.google.cloud.pubsub.v1.{AckReplyConsumer, MessageReceiver, Subscriber}
 import com.google.common.util.concurrent.MoreExecutors
-import com.google.pubsub.v1.{PubsubMessage, SubscriptionName}
+import com.google.pubsub.v1.{ProjectSubscriptionName, PubsubMessage}
 
-private[pubsub] final class PubsubSource(subscription: SubscriptionName, credentials: CredentialsProvider)
+private[pubsub] final class PubsubSource(subscription: ProjectSubscriptionName, credentials: CredentialsProvider)
   extends GraphStage[SourceShape[PubsubMessage]] {
 
   val out: Outlet[PubsubMessage] = Outlet("PubsubSource.out")

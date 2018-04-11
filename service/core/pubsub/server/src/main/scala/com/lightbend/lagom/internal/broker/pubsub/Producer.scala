@@ -11,9 +11,10 @@ import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source, Unzip, Zip}
 import akka.stream.{FlowShape, KillSwitch, KillSwitches, Materializer}
 import com.google.api.core.{ApiFutureCallback, ApiFutures}
 import com.google.api.gax.core.{CredentialsProvider, FixedCredentialsProvider}
+import com.google.api.gax.rpc.AlreadyExistsException
 import com.google.auth.oauth2.ServiceAccountCredentials
 import com.google.cloud.pubsub.v1.{Publisher, TopicAdminClient, TopicAdminSettings}
-import com.google.pubsub.v1.{PubsubMessage, TopicName}
+import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
 import com.lightbend.lagom.internal.persistence.cluster.ClusterDistribution.EnsureActive
 import com.lightbend.lagom.internal.persistence.cluster.{ClusterDistribution, ClusterDistributionSettings}
 import com.lightbend.lagom.spi.persistence.{OffsetDao, OffsetStore}
@@ -72,7 +73,7 @@ private[lagom] object Producer {
       case EnsureActive(tag) =>
         offsetStore.prepare(s"topicProducer-$topicId", tag) pipeTo self
 
-        val topic: TopicName = TopicName.of(pubsubConfig.projectId, topicId)
+        val topic: ProjectTopicName = ProjectTopicName.of(pubsubConfig.projectId, topicId)
         val credentials: CredentialsProvider =
           FixedCredentialsProvider.create(
             ServiceAccountCredentials.fromStream(new FileInputStream(pubsubConfig.serviceAccountPath)))
@@ -90,7 +91,7 @@ private[lagom] object Producer {
       case EnsureActive(_) =>
     }
 
-    private def creatingTopic(tag: String, topic: TopicName, credentials: CredentialsProvider,
+    private def creatingTopic(tag: String, topic: ProjectTopicName, credentials: CredentialsProvider,
                               topicCreated: Boolean = false, offsetDao: Option[OffsetDao] = None): Receive = {
       case TopicCreated =>
         log.debug("Topic [{}] created", topic.getTopic)
@@ -116,7 +117,7 @@ private[lagom] object Producer {
         context.stop(self)
     }
 
-    private def run(tag: String, topic: TopicName, credentials: CredentialsProvider, dao: OffsetDao): Unit = {
+    private def run(tag: String, topic: ProjectTopicName, credentials: CredentialsProvider, dao: OffsetDao): Unit = {
       val readSideSource = eventStreamFactory(tag, dao.loadedOffset)
 
       val (killSwitch, streamDone) = readSideSource
@@ -130,7 +131,7 @@ private[lagom] object Producer {
       context.become(active)
     }
 
-    private def eventsPublisherFlow(topic: TopicName, credentials: CredentialsProvider, offsetDao: OffsetDao) =
+    private def eventsPublisherFlow(topic: ProjectTopicName, credentials: CredentialsProvider, offsetDao: OffsetDao) =
       Flow.fromGraph(GraphDSL.create(pubsubFlowPublisher(topic, credentials)) { implicit builder =>
         publishFlow =>
           import GraphDSL.Implicits._
@@ -146,7 +147,7 @@ private[lagom] object Producer {
           FlowShape(unzip.in, offsetCommitter.out)
       })
 
-    private def pubsubFlowPublisher(topic: TopicName, credentials: CredentialsProvider): Flow[Message, _, _] = {
+    private def pubsubFlowPublisher(topic: ProjectTopicName, credentials: CredentialsProvider): Flow[Message, _, _] = {
       val publisher = Publisher.newBuilder(topic).setCredentialsProvider(credentials).build()
 
       Flow
@@ -163,7 +164,7 @@ private[lagom] object Producer {
                       (implicit mat: Materializer, ec: ExecutionContext) =
       Props(new TaggedOffsetProducerActor[Message](pubsubConfig, topicId, eventStreamFactory, transform, offsetStore))
 
-    def createTopic(topic: TopicName, credentials: CredentialsProvider)
+    def createTopic(topic: ProjectTopicName, credentials: CredentialsProvider)
                    (implicit ec: ExecutionContext): Future[Unit] = Future {
       val settings: TopicAdminSettings = TopicAdminSettings
         .newBuilder()
@@ -171,7 +172,12 @@ private[lagom] object Producer {
         .build()
 
       val client: TopicAdminClient = TopicAdminClient.create(settings)
-      client.createTopic(topic)
+
+      try {
+        client.createTopic(topic)
+      } catch {
+        case _: AlreadyExistsException =>
+      }
     }
 
     def publishMessage(publisher: Publisher, message: PubsubMessage): Future[Done] = {

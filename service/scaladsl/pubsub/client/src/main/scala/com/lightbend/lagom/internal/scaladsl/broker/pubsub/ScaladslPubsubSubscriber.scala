@@ -1,5 +1,6 @@
 package com.lightbend.lagom.internal.scaladsl.broker.pubsub
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 
 import akka.Done
@@ -11,25 +12,24 @@ import akka.util.ByteString
 import com.google.pubsub.v1.PubsubMessage
 import com.lightbend.lagom.internal.broker.pubsub.{ConsumerConfig, PubsubConfig, PubsubSubscriberActor}
 import com.lightbend.lagom.scaladsl.api.Descriptor.TopicCall
-import com.lightbend.lagom.scaladsl.api.ServiceInfo
-import com.lightbend.lagom.scaladsl.api.broker.Subscriber
+import com.lightbend.lagom.scaladsl.api.{ServiceInfo, broker}
+import com.lightbend.lagom.scaladsl.api.broker.{Message, MetadataKey, Subscriber}
 import com.lightbend.lagom.scaladsl.api.deser.MessageSerializer.NegotiatedDeserializer
+import com.lightbend.lagom.scaladsl.broker.pubsub.GooglePubsubMetadataKeys
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.collection.JavaConverters._
 
 /**
   * A Consumer for consuming messages from Google Pub/Sub.
   */
-private[lagom] class ScaladslPubsubSubscriber[Message](pubsubConfig: PubsubConfig,
-                                                       topicCall: TopicCall[Message],
-                                                       groupId: Subscriber.GroupId,
-                                                       info: ServiceInfo,
-                                                       system: ActorSystem)
-                                                      (implicit mat: Materializer, ec: ExecutionContext)
-  extends Subscriber[Message] {
+private[lagom] class ScaladslPubsubSubscriber[Payload, SubscriberPayload]
+(pubsubConfig: PubsubConfig, topicCall: TopicCall[Payload], groupId: Subscriber.GroupId,
+ info: ServiceInfo, system: ActorSystem, transform: (PubsubMessage, Payload) => SubscriberPayload)
+(implicit mat: Materializer, ec: ExecutionContext) extends Subscriber[SubscriberPayload] {
 
-  private val log = LoggerFactory.getLogger(classOf[ScaladslPubsubSubscriber[_]])
+  private val log = LoggerFactory.getLogger(classOf[ScaladslPubsubSubscriber[_, _]])
 
   import ScaladslPubsubSubscriber._
 
@@ -37,16 +37,18 @@ private[lagom] class ScaladslPubsubSubscriber[Message](pubsubConfig: PubsubConfi
 
   private def consumerConfig = ConsumerConfig(system.settings.config)
 
-  private def deserialize(message: PubsubMessage): Message = {
+  private def deserialize(message: PubsubMessage): SubscriberPayload = {
     val messageSerializer = topicCall.messageSerializer
     val protocol = messageSerializer.serializerForRequest.protocol
-    val negotiatedDeserializer: NegotiatedDeserializer[Message, ByteString] =
+    val negotiatedDeserializer: NegotiatedDeserializer[Payload, ByteString] =
       messageSerializer.deserializer(protocol)
 
-    negotiatedDeserializer.deserialize(ByteString(message.getData.asReadOnlyByteBuffer()))
+    val payload = negotiatedDeserializer.deserialize(ByteString(message.getData.asReadOnlyByteBuffer()))
+    message.getPublishTime.getNanos
+    transform(message, payload)
   }
 
-  override def withGroupId(groupId: String): Subscriber[Message] = {
+  override def withGroupId(groupId: String): Subscriber[SubscriberPayload] = {
     val newGroupId = {
       if (groupId == null) {
         GroupId.default(info)
@@ -54,12 +56,16 @@ private[lagom] class ScaladslPubsubSubscriber[Message](pubsubConfig: PubsubConfi
     }
 
     if (newGroupId.groupId == groupId) this
-    else new ScaladslPubsubSubscriber(pubsubConfig, topicCall, newGroupId, info, system)
+    else new ScaladslPubsubSubscriber(pubsubConfig, topicCall, newGroupId, info, system, transform)
   }
 
-  override def atMostOnceSource: Source[Message, _] = ???
+  override def withMetadata: Subscriber[Message[SubscriberPayload]] =
+    new ScaladslPubsubSubscriber[Payload, Message[SubscriberPayload]](pubsubConfig, topicCall,
+      groupId, info, system, wrapPayload)
 
-  override def atLeastOnce(flow: Flow[Message, Done, _]): Future[Done] = {
+  override def atMostOnceSource: Source[SubscriberPayload, _] = ???
+
+  override def atLeastOnce(flow: Flow[SubscriberPayload, Done, _]): Future[Done] = {
     val streamCompleted = Promise[Done]
     val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, topicCall.topicId.name,
       flow, streamCompleted, deserialize)
@@ -76,6 +82,14 @@ private[lagom] class ScaladslPubsubSubscriber[Message](pubsubConfig: PubsubConfi
     system.actorOf(backoffConsumerProps, s"PubsubBackoffConsumer$consumerId-${topicCall.topicId.name}")
 
     streamCompleted.future
+  }
+
+  private def wrapPayload(message: PubsubMessage, payload: Payload): Message[SubscriberPayload] = {
+    Message(transform(message, payload)) +
+      (GooglePubsubMetadataKeys.Id -> message.getMessageId) +
+      (GooglePubsubMetadataKeys.Attributes -> message.getAttributesMap.asScala.toMap) +
+      (GooglePubsubMetadataKeys.Timestamp ->
+        Instant.ofEpochSecond(message.getPublishTime.getSeconds, message.getPublishTime.getNanos))
   }
 }
 

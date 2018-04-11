@@ -1,7 +1,7 @@
 organization in ThisBuild := "com.elegantmonkeys"
-scalaVersion in ThisBuild := "2.11.8"
+scalaVersion in ThisBuild := "2.12.4"
 
-val lagomVersion = "1.3.0"
+val lagomVersion = "1.4.2"
 
 val slf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.25"
 val scalaTest = "org.scalatest" %% "scalatest" % "3.0.4"
@@ -13,7 +13,7 @@ val lagomJavadslBroker = "com.lightbend.lagom" %% "lagom-javadsl-broker" % lagom
 val lagomJavadslServer = "com.lightbend.lagom" %% "lagom-javadsl-server" % lagomVersion
 val lagomScaladslBroker = "com.lightbend.lagom" %% "lagom-scaladsl-broker" % lagomVersion
 val lagomScaladslServer = "com.lightbend.lagom" %% "lagom-scaladsl-server" % lagomVersion
-val pubsubSdk = "com.google.cloud" % "google-cloud-pubsub" % "0.32.0-beta"
+val pubsubSdk = "com.google.cloud" % "google-cloud-pubsub" % "0.43.0-beta"
 
 val pubsubProjects = Seq[Project]()
 
