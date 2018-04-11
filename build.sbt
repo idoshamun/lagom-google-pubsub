@@ -4,7 +4,8 @@ scalaVersion in ThisBuild := "2.12.4"
 val lagomVersion = "1.4.2"
 
 val slf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.25"
-val scalaTest = "org.scalatest" %% "scalatest" % "3.0.4"
+val logback = "ch.qos.logback" % "logback-classic" % "1.2.3"
+val scalatest = "org.scalatest" %% "scalatest" % "3.0.4"
 val lagomApi = "com.lightbend.lagom" %% "lagom-api" % lagomVersion
 val lagomApiJavaDsl = "com.lightbend.lagom" %% "lagom-javadsl-api" % lagomVersion
 val lagomApiScalaDsl = "com.lightbend.lagom" %% "lagom-scaladsl-api" % lagomVersion
@@ -27,7 +28,7 @@ lazy val `client` = (project in file("service/core/pubsub/client"))
     libraryDependencies ++= Seq(
       slf4j,
       lagomApi,
-      scalaTest % Test,
+      scalatest % Test,
       pubsubSdk
     )
   )
@@ -36,7 +37,10 @@ lazy val `client-scaladsl` = (project in file("service/scaladsl/pubsub/client"))
   .settings(name := "lagom-scaladsl-google-pubsub-client")
   .settings(
     libraryDependencies ++= Seq(
-      lagomApiScalaDsl
+      slf4j,
+      lagomApiScalaDsl,
+      scalatest % Test,
+      logback % Test
     )
   )
   .dependsOn(`client`)
@@ -45,6 +49,7 @@ lazy val `client-javadsl` = (project in file("service/javadsl/pubsub/client"))
   .settings(name := "lagom-javadsl-google-pubsub-client")
   .settings(
     libraryDependencies ++= Seq(
+      slf4j,
       lagomJavadslServer
     )
   )
@@ -66,6 +71,7 @@ lazy val `server-scaladsl` = (project in file("service/scaladsl/pubsub/server"))
   .settings(name := "lagom-scaladsl-google-pubsub-broker")
   .settings(
     libraryDependencies ++= Seq(
+      slf4j,
       lagomScaladslBroker,
       lagomScaladslServer
     )
@@ -76,6 +82,7 @@ lazy val `server-javadsl` = (project in file("service/javadsl/pubsub/server"))
   .settings(name := "lagom-javadsl-google-pubsub-broker")
   .settings(
     libraryDependencies ++= Seq(
+      slf4j,
       lagomJavadslBroker,
       lagomJavadslServer
     )
