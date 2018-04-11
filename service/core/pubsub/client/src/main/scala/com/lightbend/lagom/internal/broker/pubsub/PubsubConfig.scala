@@ -11,7 +11,10 @@ sealed trait PubsubConfig {
   def projectId: String
 
   /** The path to the service account */
-  def serviceAccountPath: String
+  def serviceAccountPath: Option[String]
+
+  /** Host of the Google Pub/Sub emulator */
+  def emulatorHost: Option[String]
 }
 
 object PubsubConfig {
@@ -20,7 +23,10 @@ object PubsubConfig {
 
   private final class PubsubConfigImpl(conf: Config) extends PubsubConfig {
     override val projectId: String = conf.getString("project-id")
-    override val serviceAccountPath: String = conf.getString("service-account-path")
+    override val serviceAccountPath: Option[String] =
+      if (conf.hasPath("service-account-path")) Some(conf.getString("service-account-path")) else None
+    override val emulatorHost: Option[String] =
+      if (conf.hasPath("emulator-host")) Some(conf.getString("emulator-host")) else None
   }
 
 }

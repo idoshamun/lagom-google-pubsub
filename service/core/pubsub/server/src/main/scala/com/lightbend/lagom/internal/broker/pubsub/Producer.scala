@@ -10,14 +10,16 @@ import akka.persistence.query.Offset
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source, Unzip, Zip}
 import akka.stream.{FlowShape, KillSwitch, KillSwitches, Materializer}
 import com.google.api.core.{ApiFutureCallback, ApiFutures}
-import com.google.api.gax.core.{CredentialsProvider, FixedCredentialsProvider}
-import com.google.api.gax.rpc.AlreadyExistsException
+import com.google.api.gax.core.{CredentialsProvider, FixedCredentialsProvider, NoCredentialsProvider}
+import com.google.api.gax.grpc.GrpcTransportChannel
+import com.google.api.gax.rpc.{AlreadyExistsException, FixedTransportChannelProvider}
 import com.google.auth.oauth2.ServiceAccountCredentials
 import com.google.cloud.pubsub.v1.{Publisher, TopicAdminClient, TopicAdminSettings}
 import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
 import com.lightbend.lagom.internal.persistence.cluster.ClusterDistribution.EnsureActive
 import com.lightbend.lagom.internal.persistence.cluster.{ClusterDistribution, ClusterDistributionSettings}
 import com.lightbend.lagom.spi.persistence.{OffsetDao, OffsetStore}
+import io.grpc.ManagedChannelBuilder
 
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -74,14 +76,10 @@ private[lagom] object Producer {
         offsetStore.prepare(s"topicProducer-$topicId", tag) pipeTo self
 
         val topic: ProjectTopicName = ProjectTopicName.of(pubsubConfig.projectId, topicId)
-        val credentials: CredentialsProvider =
-          FixedCredentialsProvider.create(
-            ServiceAccountCredentials.fromStream(new FileInputStream(pubsubConfig.serviceAccountPath)))
 
+        createTopic(topic, pubsubConfig).map(_ => TopicCreated) pipeTo self
 
-        createTopic(topic, credentials).map(_ => TopicCreated) pipeTo self
-
-        context.become(creatingTopic(tag, topic, credentials))
+        context.become(creatingTopic(tag, topic))
     }
 
     def generalHandler: Receive = {
@@ -91,23 +89,23 @@ private[lagom] object Producer {
       case EnsureActive(_) =>
     }
 
-    private def creatingTopic(tag: String, topic: ProjectTopicName, credentials: CredentialsProvider,
+    private def creatingTopic(tag: String, topic: ProjectTopicName,
                               topicCreated: Boolean = false, offsetDao: Option[OffsetDao] = None): Receive = {
       case TopicCreated =>
         log.debug("Topic [{}] created", topic.getTopic)
 
         if (offsetDao.isDefined) {
-          run(tag, topic, credentials, offsetDao.get)
+          run(tag, topic, offsetDao.get)
         } else {
-          context.become(creatingTopic(tag, topic, credentials, topicCreated = true, offsetDao))
+          context.become(creatingTopic(tag, topic, topicCreated = true, offsetDao))
         }
       case od: OffsetDao =>
         log.debug("OffsetDao prepared for subscriber of [{}]", topicId)
 
         if (topicCreated) {
-          run(tag, topic, credentials, od)
+          run(tag, topic, od)
         } else {
-          context.become(creatingTopic(tag, topic, credentials, topicCreated, Some(od)))
+          context.become(creatingTopic(tag, topic, topicCreated, Some(od)))
         }
     }
 
@@ -117,12 +115,12 @@ private[lagom] object Producer {
         context.stop(self)
     }
 
-    private def run(tag: String, topic: ProjectTopicName, credentials: CredentialsProvider, dao: OffsetDao): Unit = {
+    private def run(tag: String, topic: ProjectTopicName, dao: OffsetDao): Unit = {
       val readSideSource = eventStreamFactory(tag, dao.loadedOffset)
 
       val (killSwitch, streamDone) = readSideSource
         .viaMat(KillSwitches.single)(Keep.right)
-        .via(eventsPublisherFlow(topic, credentials, dao))
+        .via(eventsPublisherFlow(topic, dao))
         .toMat(Sink.ignore)(Keep.both)
         .run()
 
@@ -131,8 +129,8 @@ private[lagom] object Producer {
       context.become(active)
     }
 
-    private def eventsPublisherFlow(topic: ProjectTopicName, credentials: CredentialsProvider, offsetDao: OffsetDao) =
-      Flow.fromGraph(GraphDSL.create(pubsubFlowPublisher(topic, credentials)) { implicit builder =>
+    private def eventsPublisherFlow(topic: ProjectTopicName, offsetDao: OffsetDao) =
+      Flow.fromGraph(GraphDSL.create(pubsubFlowPublisher(topic)) { implicit builder =>
         publishFlow =>
           import GraphDSL.Implicits._
           val unzip = builder.add(Unzip[Message, Offset])
@@ -147,8 +145,30 @@ private[lagom] object Producer {
           FlowShape(unzip.in, offsetCommitter.out)
       })
 
-    private def pubsubFlowPublisher(topic: ProjectTopicName, credentials: CredentialsProvider): Flow[Message, _, _] = {
-      val publisher = Publisher.newBuilder(topic).setCredentialsProvider(credentials).build()
+    private def pubsubFlowPublisher(topic: ProjectTopicName): Flow[Message, _, _] = {
+      val publisher = {
+        val builder = Publisher.newBuilder(topic)
+        pubsubConfig.emulatorHost
+          .map { host =>
+            val channel = ManagedChannelBuilder.forTarget(host).usePlaintext(true).build()
+            val channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel))
+            builder
+              .setChannelProvider(channelProvider)
+              .setCredentialsProvider(NoCredentialsProvider.create).build
+          }
+          .getOrElse {
+            pubsubConfig.serviceAccountPath
+              .map { path =>
+                builder.setCredentialsProvider(
+                  FixedCredentialsProvider.create(
+                    ServiceAccountCredentials.fromStream(
+                      new FileInputStream(path)))).build()
+              }
+              .getOrElse {
+                builder.build()
+              }
+          }
+      }
 
       Flow
         .fromFunction[Message, Message](identity)
@@ -164,12 +184,31 @@ private[lagom] object Producer {
                       (implicit mat: Materializer, ec: ExecutionContext) =
       Props(new TaggedOffsetProducerActor[Message](pubsubConfig, topicId, eventStreamFactory, transform, offsetStore))
 
-    def createTopic(topic: ProjectTopicName, credentials: CredentialsProvider)
+    def createTopic(topic: ProjectTopicName, pubsubConfig: PubsubConfig)
                    (implicit ec: ExecutionContext): Future[Unit] = Future {
-      val settings: TopicAdminSettings = TopicAdminSettings
-        .newBuilder()
-        .setCredentialsProvider(credentials)
-        .build()
+      val settings: TopicAdminSettings = {
+        val builder = TopicAdminSettings.newBuilder()
+        pubsubConfig.emulatorHost
+          .map { host =>
+            val channel = ManagedChannelBuilder.forTarget(host).usePlaintext(true).build()
+            val channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel))
+            builder
+              .setTransportChannelProvider(channelProvider)
+              .setCredentialsProvider(NoCredentialsProvider.create).build
+          }
+          .getOrElse {
+            pubsubConfig.serviceAccountPath
+              .map { path =>
+                builder.setCredentialsProvider(
+                  FixedCredentialsProvider.create(
+                    ServiceAccountCredentials.fromStream(
+                      new FileInputStream(path)))).build()
+              }
+              .getOrElse {
+                builder.build()
+              }
+          }
+      }
 
       val client: TopicAdminClient = TopicAdminClient.create(settings)
 
