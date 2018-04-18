@@ -73,7 +73,9 @@ lazy val `server-scaladsl` = (project in file("service/scaladsl/pubsub/server"))
     libraryDependencies ++= Seq(
       slf4j,
       lagomScaladslBroker,
-      lagomScaladslServer
+      lagomScaladslServer,
+      scalatest % Test,
+      logback % Test
     )
   )
   .dependsOn(`server`, `client-scaladsl`)

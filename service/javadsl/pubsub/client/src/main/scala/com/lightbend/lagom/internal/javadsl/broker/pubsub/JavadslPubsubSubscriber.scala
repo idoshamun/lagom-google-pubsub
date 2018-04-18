@@ -35,6 +35,7 @@ private[lagom] class JavadslPubsubSubscriber[Message](pubsubConfig: PubsubConfig
   private lazy val consumerId = PubsubClientIdSequenceNumber.getAndIncrement
 
   private def consumerConfig = ConsumerConfig(system.settings.config)
+  private val subscriptionName = PubsubSubscriberActor.subscriptionName(groupId.groupId, topicCall.topicId.value)
 
   private def deserialize(message: PubsubMessage): Message = {
     val messageSerializer = topicCall.messageSerializer
@@ -60,8 +61,8 @@ private[lagom] class JavadslPubsubSubscriber[Message](pubsubConfig: PubsubConfig
 
   override def atLeastOnce(flow: Flow[Message, Done, _]): CompletionStage[Done] = {
     val streamCompleted = Promise[Done]
-    val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, topicCall.topicId.value,
-      flow.asScala, streamCompleted, deserialize)
+    val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, subscriptionName,
+      topicCall.topicId.value, flow.asScala, streamCompleted, deserialize)
 
 
     val backoffConsumerProps = BackoffSupervisor.propsWithSupervisorStrategy(

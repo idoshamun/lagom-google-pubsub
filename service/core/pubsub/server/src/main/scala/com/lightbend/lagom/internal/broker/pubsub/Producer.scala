@@ -3,18 +3,18 @@ package com.lightbend.lagom.internal.broker.pubsub
 import java.io.FileInputStream
 
 import akka.Done
-import akka.actor.{Actor, ActorLogging, ActorSystem, Props, SupervisorStrategy}
+import akka.actor.{Actor, ActorLogging, ActorSystem, Props, Status, SupervisorStrategy}
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.pattern.{BackoffSupervisor, pipe}
 import akka.persistence.query.Offset
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source, Unzip, Zip}
 import akka.stream.{FlowShape, KillSwitch, KillSwitches, Materializer}
 import com.google.api.core.{ApiFutureCallback, ApiFutures}
-import com.google.api.gax.core.{CredentialsProvider, FixedCredentialsProvider, NoCredentialsProvider}
+import com.google.api.gax.core.{FixedCredentialsProvider, NoCredentialsProvider}
 import com.google.api.gax.grpc.GrpcTransportChannel
-import com.google.api.gax.rpc.{AlreadyExistsException, FixedTransportChannelProvider}
+import com.google.api.gax.rpc.FixedTransportChannelProvider
 import com.google.auth.oauth2.ServiceAccountCredentials
-import com.google.cloud.pubsub.v1.{Publisher, TopicAdminClient, TopicAdminSettings}
+import com.google.cloud.pubsub.v1.Publisher
 import com.google.pubsub.v1.{ProjectTopicName, PubsubMessage}
 import com.lightbend.lagom.internal.persistence.cluster.ClusterDistribution.EnsureActive
 import com.lightbend.lagom.internal.persistence.cluster.{ClusterDistribution, ClusterDistributionSettings}
@@ -23,7 +23,6 @@ import io.grpc.ManagedChannelBuilder
 
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.Failure
 
 private[lagom] object Producer {
 
@@ -77,22 +76,22 @@ private[lagom] object Producer {
 
         val topic: ProjectTopicName = ProjectTopicName.of(pubsubConfig.projectId, topicId)
 
-        createTopic(topic, pubsubConfig).map(_ => TopicCreated) pipeTo self
+        Future {
+          PubsubSubscriberActor.createTopic(topic, pubsubConfig)
+        }.map(_ => TopicCreated) pipeTo self
 
         context.become(creatingTopic(tag, topic))
     }
 
     def generalHandler: Receive = {
-      case Failure(e) =>
-        throw e
-
+      case Status.Failure(e) => throw e
       case EnsureActive(_) =>
     }
 
     private def creatingTopic(tag: String, topic: ProjectTopicName,
                               topicCreated: Boolean = false, offsetDao: Option[OffsetDao] = None): Receive = {
       case TopicCreated =>
-        log.debug("Topic [{}] created", topic.getTopic)
+        log.debug("Topic [{}] found/created", topic.getTopic)
 
         if (offsetDao.isDefined) {
           run(tag, topic, offsetDao.get)
@@ -171,8 +170,7 @@ private[lagom] object Producer {
       }
 
       Flow
-        .fromFunction[Message, Message](identity)
-        .map(transform)
+        .fromFunction[Message, PubsubMessage](transform)
         .mapAsync(1)(msg => publishMessage(publisher, msg))
     }
   }
@@ -183,41 +181,6 @@ private[lagom] object Producer {
                        transform: Message => PubsubMessage, offsetStore: OffsetStore)
                       (implicit mat: Materializer, ec: ExecutionContext) =
       Props(new TaggedOffsetProducerActor[Message](pubsubConfig, topicId, eventStreamFactory, transform, offsetStore))
-
-    def createTopic(topic: ProjectTopicName, pubsubConfig: PubsubConfig)
-                   (implicit ec: ExecutionContext): Future[Unit] = Future {
-      val settings: TopicAdminSettings = {
-        val builder = TopicAdminSettings.newBuilder()
-        pubsubConfig.emulatorHost
-          .map { host =>
-            val channel = ManagedChannelBuilder.forTarget(host).usePlaintext(true).build()
-            val channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel))
-            builder
-              .setTransportChannelProvider(channelProvider)
-              .setCredentialsProvider(NoCredentialsProvider.create).build
-          }
-          .getOrElse {
-            pubsubConfig.serviceAccountPath
-              .map { path =>
-                builder.setCredentialsProvider(
-                  FixedCredentialsProvider.create(
-                    ServiceAccountCredentials.fromStream(
-                      new FileInputStream(path)))).build()
-              }
-              .getOrElse {
-                builder.build()
-              }
-          }
-      }
-
-      val client: TopicAdminClient = TopicAdminClient.create(settings)
-
-      try {
-        client.createTopic(topic)
-      } catch {
-        case _: AlreadyExistsException =>
-      }
-    }
 
     def publishMessage(publisher: Publisher, message: PubsubMessage): Future[Done] = {
       val resultFuture = publisher.publish(message)

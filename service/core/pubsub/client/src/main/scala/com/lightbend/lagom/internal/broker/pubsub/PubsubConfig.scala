@@ -70,14 +70,31 @@ object ProducerConfig {
 }
 
 sealed trait ConsumerConfig extends ClientConfig {
-  /** The name of the subscription that will be created to pull messages */
-  def subscriptionName: String
-
   /**
     * The maximum time after a subscriber receives a message before
     * the subscriber should acknowledge the message (seconds)
     */
   def ackDeadline: Int
+
+  /**
+    * The time (milliseconds) between Pub/Sub pulling request
+    */
+  def pullingInterval: Int
+
+  /**
+    * The maximum buffer size for the messages stream
+    */
+  def offsetBuffer: Int
+
+  /**
+    * The number of messages to group before acknowledging
+    */
+  def batchingSize: Int
+
+  /**
+    * The time to group messages before acknowledging
+    */
+  def batchingInterval: FiniteDuration
 }
 
 object ConsumerConfig {
@@ -86,8 +103,18 @@ object ConsumerConfig {
 
   private final class ConsumerConfigImpl(conf: Config) extends ClientConfig.ClientConfigImpl(conf) with ConsumerConfig {
 
-    override val subscriptionName: String = conf.getString("subscription-name")
     override val ackDeadline: Int = conf.getInt("ack-deadline")
+
+    override val pullingInterval: Int = conf.getInt("pulling-interval")
+
+    override def offsetBuffer: Int = conf.getInt("offset-buffer")
+
+    override val batchingSize: Int = conf.getInt("batching-size")
+
+    override val batchingInterval: FiniteDuration = {
+      val interval = conf.getDuration("batching-interval")
+      FiniteDuration(interval.toMillis(), TimeUnit.MILLISECONDS)
+    }
   }
 
 }

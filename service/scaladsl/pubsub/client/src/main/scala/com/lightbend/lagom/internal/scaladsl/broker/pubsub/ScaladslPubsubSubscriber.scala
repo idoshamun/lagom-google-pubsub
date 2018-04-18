@@ -12,8 +12,8 @@ import akka.util.ByteString
 import com.google.pubsub.v1.PubsubMessage
 import com.lightbend.lagom.internal.broker.pubsub.{ConsumerConfig, PubsubConfig, PubsubSubscriberActor}
 import com.lightbend.lagom.scaladsl.api.Descriptor.TopicCall
-import com.lightbend.lagom.scaladsl.api.{ServiceInfo, broker}
-import com.lightbend.lagom.scaladsl.api.broker.{Message, MetadataKey, Subscriber}
+import com.lightbend.lagom.scaladsl.api.ServiceInfo
+import com.lightbend.lagom.scaladsl.api.broker.{Message, Subscriber}
 import com.lightbend.lagom.scaladsl.api.deser.MessageSerializer.NegotiatedDeserializer
 import com.lightbend.lagom.scaladsl.broker.pubsub.GooglePubsubMetadataKeys
 import org.slf4j.LoggerFactory
@@ -35,7 +35,8 @@ private[lagom] class ScaladslPubsubSubscriber[Payload, SubscriberPayload]
 
   private lazy val consumerId = PubsubClientIdSequenceNumber.getAndIncrement
 
-  private def consumerConfig = ConsumerConfig(system.settings.config)
+  private val consumerConfig = ConsumerConfig(system.settings.config)
+  private val subscriptionName = PubsubSubscriberActor.subscriptionName(groupId.groupId, topicCall.topicId.name)
 
   private def deserialize(message: PubsubMessage): SubscriberPayload = {
     val messageSerializer = topicCall.messageSerializer
@@ -67,8 +68,8 @@ private[lagom] class ScaladslPubsubSubscriber[Payload, SubscriberPayload]
 
   override def atLeastOnce(flow: Flow[SubscriberPayload, Done, _]): Future[Done] = {
     val streamCompleted = Promise[Done]
-    val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, topicCall.topicId.name,
-      flow, streamCompleted, deserialize)
+    val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, subscriptionName,
+      topicCall.topicId.name, flow, streamCompleted, deserialize)
 
 
     val backoffConsumerProps = BackoffSupervisor.propsWithSupervisorStrategy(
@@ -77,7 +78,8 @@ private[lagom] class ScaladslPubsubSubscriber[Payload, SubscriberPayload]
       consumerConfig.minBackoff,
       consumerConfig.maxBackoff,
       consumerConfig.randomBackoffFactor,
-      SupervisorStrategy.stoppingStrategy)
+      SupervisorStrategy.stoppingStrategy
+    )
 
     system.actorOf(backoffConsumerProps, s"PubsubBackoffConsumer$consumerId-${topicCall.topicId.name}")
 
