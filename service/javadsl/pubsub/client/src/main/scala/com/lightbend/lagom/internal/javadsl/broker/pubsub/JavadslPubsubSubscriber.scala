@@ -49,11 +49,11 @@ private[lagom] class JavadslPubsubSubscriber[Payload, SubscriberPayload]
     transform(message, payload)
   }
 
-  override def withGroupId(groupId: String): Subscriber[SubscriberPayload] = {
+  override def withGroupId(groupIdName: String): Subscriber[SubscriberPayload] = {
     val newGroupId = {
       if (groupId == null) {
         GroupId.default(info)
-      } else GroupId(groupId)
+      } else GroupId(groupIdName)
     }
 
     if (newGroupId == groupId) this
