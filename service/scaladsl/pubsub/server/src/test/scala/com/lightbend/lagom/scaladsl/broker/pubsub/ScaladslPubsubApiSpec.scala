@@ -59,7 +59,7 @@ class ScaladslPubsubApiSpec extends WordSpecLike
   private val consumerConfig = ConsumerConfig(application.config)
 
   private val groupAndTopics =
-    1.to(7).map { index => (s"testservice$index", topicName(index)) }.map { tuple =>
+    1.to(5).map { index => (s"testservice$index", topicName(index)) }.map { tuple =>
       (
         ProjectSubscriptionName.of(pubsubConfig.projectId, PubsubSubscriberActor.subscriptionName(tuple._1, tuple._2)),
         ProjectTopicName.of(pubsubConfig.projectId, tuple._2)
@@ -205,16 +205,12 @@ class ScaladslPubsubApiSpec extends WordSpecLike
       val initialOffset = offsetDao.loadedOffset
       initialOffset shouldBe NoOffset
 
-      // Fake setting an offset to simulate a topic that has been restarted
-      offsetDao.saveOffset(Sequence(1))
-
       // Put some messages in the stream
       test3EventJournal.append("firstMessage")
       test3EventJournal.append("secondMessage")
       test3EventJournal.append("thirdMessage")
 
       // Wait for a subscriber to consume them all (which ensures they've all been published)
-      // TODO: check if CountDownLatch should be 1 indeed and not 3 (as in Lagom)
       val allMessagesReceived = new CountDownLatch(1)
       testService.test3Topic
         .subscribe
@@ -226,7 +222,7 @@ class ScaladslPubsubApiSpec extends WordSpecLike
           }
         }
 
-      assert(allMessagesReceived.await(100, TimeUnit.SECONDS))
+      assert(allMessagesReceived.await(30, TimeUnit.SECONDS))
 
       // After publishing all of the messages we expect the offset store
       // to have been updated with the offset of the last consumed message
@@ -293,8 +289,6 @@ object ScaladslPubsubApiSpec {
   private val test3EventJournal = new EventJournal[String]
   private val test4EventJournal = new EventJournal[String]
   private val test5EventJournal = new EventJournal[String]
-  private val test6EventJournal = new EventJournal[String]
-  private val test7EventJournal = new EventJournal[String]
 
   // Allows tests to insert logic into the producer stream
   @volatile var messageTransformer: String => String = identity
@@ -310,10 +304,6 @@ object ScaladslPubsubApiSpec {
 
     def test5Topic: Topic[String]
 
-    def test6Topic: Topic[String]
-
-    def test7Topic: Topic[String]
-
     import Service._
 
     override def descriptor: Descriptor = {
@@ -323,9 +313,7 @@ object ScaladslPubsubApiSpec {
           topic(topicName(2), test2Topic),
           topic(topicName(3), test3Topic),
           topic(topicName(4), test4Topic),
-          topic(topicName(5), test5Topic),
-          topic(topicName(6), test6Topic),
-          topic(topicName(7), test7Topic)
+          topic(topicName(5), test5Topic)
         )
     }
   }
@@ -342,10 +330,6 @@ object ScaladslPubsubApiSpec {
     override def test4Topic: Topic[String] = createTopicProducer(test4EventJournal)
 
     override def test5Topic: Topic[String] = createTopicProducer(test5EventJournal)
-
-    override def test6Topic: Topic[String] = createTopicProducer(test6EventJournal)
-
-    override def test7Topic: Topic[String] = createTopicProducer(test7EventJournal)
 
     private def createTopicProducer(eventJournal: EventJournal[String]): Topic[String] = {
       TopicProducer.singleStreamWithOffset { fromOffset =>
