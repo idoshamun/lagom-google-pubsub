@@ -18,7 +18,7 @@ private[lagom] class JavadslPubsubTopic[Message](pubsubConfig: PubsubConfig,
                                                  ec: ExecutionContext) extends Topic[Message] {
   override def topicId: TopicId = topicCall.topicId
 
-  override def subscribe: Subscriber[Message] = new JavadslPubsubSubscriber(pubsubConfig, topicCall,
-    JavadslPubsubSubscriber.GroupId.default(info), info, system)
+  override def subscribe: Subscriber[Message] = new JavadslPubsubSubscriber[Message, Message](pubsubConfig, topicCall,
+    JavadslPubsubSubscriber.GroupId.default(info), info, system, (_, payload) => payload)
 }
 

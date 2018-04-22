@@ -1,5 +1,6 @@
 package com.lightbend.lagom.internal.javadsl.broker.pubsub
 
+import java.time.Instant
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -15,51 +16,57 @@ import com.lightbend.lagom.javadsl.api.Descriptor.TopicCall
 import com.lightbend.lagom.javadsl.api.ServiceInfo
 import com.lightbend.lagom.javadsl.api.broker.Subscriber
 import com.lightbend.lagom.javadsl.api.deser.MessageSerializer.NegotiatedDeserializer
+import com.lightbend.lagom.javadsl.api.broker.Message
+import com.lightbend.lagom.javadsl.broker.pubsub.GooglePubsubMetadataKeys
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.{ExecutionContext, Promise}
 import scala.compat.java8.FutureConverters._
 
-private[lagom] class JavadslPubsubSubscriber[Message](pubsubConfig: PubsubConfig,
-                                                      topicCall: TopicCall[Message],
-                                                      groupId: Subscriber.GroupId,
-                                                      info: ServiceInfo,
-                                                      system: ActorSystem)
-                                                     (implicit mat: Materializer, ec: ExecutionContext)
-  extends Subscriber[Message] {
+private[lagom] class JavadslPubsubSubscriber[Payload, SubscriberPayload]
+(pubsubConfig: PubsubConfig, topicCall: TopicCall[Payload], groupId: Subscriber.GroupId,
+ info: ServiceInfo, system: ActorSystem, transform: (PubsubMessage, Payload) => SubscriberPayload)
+(implicit mat: Materializer, ec: ExecutionContext)
+  extends Subscriber[SubscriberPayload] {
 
-  private val log = LoggerFactory.getLogger(classOf[JavadslPubsubSubscriber[_]])
+  private val log = LoggerFactory.getLogger(classOf[JavadslPubsubSubscriber[_, _]])
 
   import JavadslPubsubSubscriber._
 
   private lazy val consumerId = PubsubClientIdSequenceNumber.getAndIncrement
 
   private def consumerConfig = ConsumerConfig(system.settings.config)
-  private val subscriptionName = PubsubSubscriberActor.subscriptionName(groupId.groupId, topicCall.topicId.value)
 
-  private def deserialize(message: PubsubMessage): Message = {
+  private lazy val subscriptionName = PubsubSubscriberActor.subscriptionName(groupId.groupId, topicCall.topicId.value)
+
+  private def deserialize(message: PubsubMessage): SubscriberPayload = {
     val messageSerializer = topicCall.messageSerializer
     val protocol = messageSerializer.serializerForRequest.protocol
-    val negotiatedDeserializer: NegotiatedDeserializer[Message, ByteString] =
+    val negotiatedDeserializer: NegotiatedDeserializer[Payload, ByteString] =
       messageSerializer.deserializer(protocol)
 
-    negotiatedDeserializer.deserialize(ByteString(message.getData.asReadOnlyByteBuffer()))
+    val payload = negotiatedDeserializer.deserialize(ByteString(message.getData.asReadOnlyByteBuffer()))
+    transform(message, payload)
   }
 
-  override def withGroupId(groupId: String): Subscriber[Message] = {
+  override def withGroupId(groupId: String): Subscriber[SubscriberPayload] = {
     val newGroupId = {
       if (groupId == null) {
         GroupId.default(info)
       } else GroupId(groupId)
     }
 
-    if (newGroupId.groupId == groupId) this
-    else new JavadslPubsubSubscriber(pubsubConfig, topicCall, newGroupId, info, system)
+    if (newGroupId == groupId) this
+    else new JavadslPubsubSubscriber(pubsubConfig, topicCall, newGroupId, info, system, transform)
   }
 
-  override def atMostOnceSource: Source[Message, _] = ???
+  override def withMetadata: Subscriber[Message[SubscriberPayload]] =
+    new JavadslPubsubSubscriber[Payload, Message[SubscriberPayload]](pubsubConfig, topicCall,
+      groupId, info, system, wrapPayload)
 
-  override def atLeastOnce(flow: Flow[Message, Done, _]): CompletionStage[Done] = {
+  override def atMostOnceSource: Source[SubscriberPayload, _] = ???
+
+  override def atLeastOnce(flow: Flow[SubscriberPayload, Done, _]): CompletionStage[Done] = {
     val streamCompleted = Promise[Done]
     val consumerProps = PubsubSubscriberActor.props(pubsubConfig, consumerConfig, subscriptionName,
       topicCall.topicId.value, flow.asScala, streamCompleted, deserialize)
@@ -76,6 +83,13 @@ private[lagom] class JavadslPubsubSubscriber[Message](pubsubConfig: PubsubConfig
     system.actorOf(backoffConsumerProps, s"PubsubBackoffConsumer$consumerId-${topicCall.topicId.value}")
 
     streamCompleted.future.toJava
+  }
+
+  private def wrapPayload(message: PubsubMessage, payload: Payload): Message[SubscriberPayload] = {
+    Message.create(transform(message, payload))
+      .add(GooglePubsubMetadataKeys.ID, message.getMessageId)
+      .add(GooglePubsubMetadataKeys.ATTRIBUTES, message.getAttributesMap)
+      .add(GooglePubsubMetadataKeys.TIMESTAMP, Instant.ofEpochSecond(message.getPublishTime.getSeconds, message.getPublishTime.getNanos))
   }
 }
 

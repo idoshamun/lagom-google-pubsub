@@ -45,7 +45,6 @@ private[lagom] class ScaladslPubsubSubscriber[Payload, SubscriberPayload]
       messageSerializer.deserializer(protocol)
 
     val payload = negotiatedDeserializer.deserialize(ByteString(message.getData.asReadOnlyByteBuffer()))
-    message.getPublishTime.getNanos
     transform(message, payload)
   }
 
