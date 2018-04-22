@@ -88,7 +88,9 @@ lazy val `server-javadsl` = (project in file("service/javadsl/pubsub/server"))
     libraryDependencies ++= Seq(
       slf4j,
       lagomJavadslBroker,
-      lagomJavadslServer
+      lagomJavadslServer,
+      scalatest % Test,
+      logback % Test
     )
   )
   .dependsOn(`server`, `client-javadsl`)
