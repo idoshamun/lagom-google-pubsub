@@ -1,24 +1,24 @@
 organization in ThisBuild := "com.elegantmonkeys"
 scalaVersion in ThisBuild := "2.12.4"
 
-useGpg := true
+useGpg in ThisBuild := true
 
 // Add sonatype repository settings
-publishTo := sonatypePublishTo.value
+publishTo in ThisBuild := sonatypePublishTo.value
 
 // To sync with Maven central, you need to supply the following information:
-publishMavenStyle := true
+publishMavenStyle in ThisBuild := true
 
 // License of your choice
-licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
+licenses in ThisBuild := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
 
 import sbtrelease.ReleaseStateTransformations._
 import xerial.sbt.Sonatype._
 
 // Where is the source code hosted
-sonatypeProjectHosting := Some(GitHubHosting("elegantmonkeys", "lagom-google-pubsub", "contact@elegantmonkeys"))
+sonatypeProjectHosting in ThisBuild := Some(GitHubHosting("elegantmonkeys", "lagom-google-pubsub", "contact@elegantmonkeys"))
 
-developers := List(Developer(id = "lagom-google-pubsub",
+developers in ThisBuild := List(Developer(id = "lagom-google-pubsub",
   name = "Lagom Google Pubsub Contributors",
   email = null,
   url = null))
@@ -38,10 +38,16 @@ val lagomScaladslBroker = "com.lightbend.lagom" %% "lagom-scaladsl-broker" % lag
 val lagomScaladslServer = "com.lightbend.lagom" %% "lagom-scaladsl-server" % lagomVersion
 val pubsubSdk = "com.google.cloud" % "google-cloud-pubsub" % "0.43.0-beta"
 
-val pubsubProjects = Seq[Project]()
+val pubsubProjects = Seq[Project](
+  `client`, `client-scaladsl`, `client-javadsl`,
+  `server`, `server-scaladsl`, `server-javadsl`
+)
 
 lazy val root = (project in file("."))
-  .settings(name := "lagom-google-pubsub")
+  .settings(
+    name := "lagom-google-pubsub",
+    packagedArtifacts := Map.empty
+  )
   .aggregate(pubsubProjects.map(Project.projectToRef): _*)
 
 lazy val `client` = (project in file("service/core/pubsub/client"))
