@@ -1,6 +1,28 @@
 organization in ThisBuild := "com.elegantmonkeys"
 scalaVersion in ThisBuild := "2.12.4"
 
+useGpg := true
+
+// Add sonatype repository settings
+publishTo := sonatypePublishTo.value
+
+// To sync with Maven central, you need to supply the following information:
+publishMavenStyle := true
+
+// License of your choice
+licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
+
+import sbtrelease.ReleaseStateTransformations._
+import xerial.sbt.Sonatype._
+
+// Where is the source code hosted
+sonatypeProjectHosting := Some(GitHubHosting("elegantmonkeys", "lagom-google-pubsub", "contact@elegantmonkeys"))
+
+developers := List(Developer(id = "lagom-google-pubsub",
+  name = "Lagom Google Pubsub Contributors",
+  email = null,
+  url = null))
+
 val lagomVersion = "1.4.2"
 
 val slf4j = "org.slf4j" % "log4j-over-slf4j" % "1.7.25"
@@ -94,3 +116,20 @@ lazy val `server-javadsl` = (project in file("service/javadsl/pubsub/server"))
     )
   )
   .dependsOn(`server`, `client-javadsl`)
+
+releaseCommitMessage := s"chore: set version to ${(version in ThisBuild).value}"
+
+releaseProcess := Seq[ReleaseStep](
+  checkSnapshotDependencies,
+  inquireVersions,
+  runClean,
+  runTest,
+  setReleaseVersion,
+  commitReleaseVersion,
+  tagRelease,
+  releaseStepCommand("publishSigned"),
+  setNextVersion,
+  commitNextVersion,
+  releaseStepCommand("sonatypeReleaseAll"),
+  pushChanges
+)
