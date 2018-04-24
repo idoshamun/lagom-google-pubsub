@@ -40,7 +40,7 @@ class ScaladslPubsubApiSpec extends WordSpecLike
 
   private val application = {
     new LagomApplication(LagomApplicationContext.Test) with AhcWSComponents
-      with LagomPubsubComponents with ConfigurationServiceLocatorComponents {
+      with LagomGooglePubsubComponents with ConfigurationServiceLocatorComponents {
       override lazy val offsetStore = new InMemoryOffsetStore
       override lazy val lagomServer = serverFor[TestService](new TestServiceImpl)
 

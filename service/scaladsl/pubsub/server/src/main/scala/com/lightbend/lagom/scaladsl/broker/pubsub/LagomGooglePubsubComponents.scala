@@ -10,7 +10,7 @@ import com.lightbend.lagom.spi.persistence.OffsetStore
   *
   * Extending this trait will automatically start all topic producers.
   */
-trait LagomPubsubComponents extends LagomGooglePubsubClientComponents {
+trait LagomGooglePubsubComponents extends LagomGooglePubsubClientComponents {
   def lagomServer: LagomServer
 
   def offsetStore: OffsetStore
