@@ -47,7 +47,9 @@ val pubsubProjects = Seq[Project](
 lazy val root = (project in file("."))
   .settings(
     name := "lagom-google-pubsub",
-    packagedArtifacts := Map.empty,
+    publishLocal := {},
+    publishArtifact in Compile := false,
+    publish := {},
     settings
   )
   .aggregate(pubsubProjects.map(Project.projectToRef): _*)
