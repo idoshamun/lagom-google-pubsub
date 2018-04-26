@@ -14,10 +14,10 @@ This project is derived from:
 
 Add the following to your `build.sbt`
 
-`libraryDependencies += "com.elegantmonkeys" %% "lagom-scaladsl-google-pubsub-broker" % "1.0.0-RC1"
+`libraryDependencies += "com.elegantmonkeys" %% "lagom-scaladsl-google-pubsub-broker" % "1.0.0-RC1"`
 
 #### Subscriber
 
 Add the following to your `build.sbt`
 
-`libraryDependencies += "com.elegantmonkeys" %% "lagom-scaladsl-google-pubsub-client" % "1.0.0-RC1" 
+`libraryDependencies += "com.elegantmonkeys" %% "lagom-scaladsl-google-pubsub-client" % "1.0.0-RC1"`
